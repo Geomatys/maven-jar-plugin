@@ -89,9 +89,32 @@ final class TimestampCheck extends SimpleFileVisitor<Path> {
     private final Map<Path, Long> filesInBuild;
 
     /**
-     * Sentinel value for {@link #filesInJAR} entries that are directories.
+     * Sentinel length stored in {@link #filesInJAR}/{@link #filesInBuild} for entries that are directories.
+     * Directories have no meaningful length to compare.
      */
     private static final long ENTRY_IS_DIRECTORY = -2;
+
+    /**
+     * {@return whether the given encoded length denotes a directory entry}
+     *
+     * @param size an encoded length from {@link #filesInJAR} or {@link #filesInBuild}
+     */
+    private static boolean isDirectory(final long size) {
+        return size == ENTRY_IS_DIRECTORY;
+    }
+
+    /**
+     * {@return whether two entry lengths are considered equal for change detection}
+     * A negative length cannot be compared — it denotes either a directory ({@value #ENTRY_IS_DIRECTORY})
+     * or an unknown size (e.g. {@link ZipEntry#getSize()} returned -1) — so it is treated as a match.
+     * Two known (non-negative) lengths must be equal.
+     *
+     * @param a the length of the file in the build directory, or a negative sentinel
+     * @param b the length of the corresponding entry in the <abbr>JAR</abbr>, or a negative sentinel
+     */
+    private static boolean sizesMatch(final long a, final long b) {
+        return a < 0 || b < 0 || a == b;
+    }
 
     /**
      * Whether at least one file is more recent than the <abbr>JAR</abbr> file.
@@ -158,7 +181,7 @@ final class TimestampCheck extends SimpleFileVisitor<Path> {
                             return false;
                         }
                         directory = null;
-                    } else if (size == ENTRY_IS_DIRECTORY) {
+                    } else if (isDirectory(size)) {
                         // Because of files order, it is sufficient to remember only the last directory.
                         directory = file;
                     }
@@ -169,7 +192,7 @@ final class TimestampCheck extends SimpleFileVisitor<Path> {
             }
             // Check for remaining files in the JAR which were not in the build directory.
             for (Map.Entry<Path, Long> entry : filesInJAR.entrySet()) {
-                if (!(entry.getValue() == ENTRY_IS_DIRECTORY || isIgnored(classesDir.relativize(entry.getKey())))) {
+                if (!(isDirectory(entry.getValue()) || isIgnored(classesDir.relativize(entry.getKey())))) {
                     return false;
                 }
             }
@@ -256,15 +279,16 @@ final class TimestampCheck extends SimpleFileVisitor<Path> {
     private boolean removeFromFilesInJAR(final Path file, final long size) {
         Long sizeInJAR = filesInJAR.remove(file);
         if (sizeInJAR != null) {
-            return (size < 0) || (sizeInJAR < 0) || (size == sizeInJAR);
+            return sizesMatch(size, sizeInJAR);
         }
         while (entries.hasMoreElements()) {
             ZipEntry entry = entries.nextElement();
             Path p = classesDir.resolve(entry.getName());
+            long entrySize = entry.isDirectory() ? ENTRY_IS_DIRECTORY : entry.getSize();
             if (p.equals(file)) {
-                return true;
+                return sizesMatch(size, entrySize);
             }
-            filesInJAR.put(p, entry.isDirectory() ? ENTRY_IS_DIRECTORY : entry.getSize());
+            filesInJAR.put(p, entrySize);
         }
         return false;
     }
