@@ -353,7 +353,7 @@ final class FileCollector extends SimpleFileVisitor<Path> {
          */
         if (role == DirectoryRole.RESOURCES) {
             currentFilesToArchive.add(directory, attributes, true);
-            if (excludedFiles == null) {
+            if (excludedFiles == null && currentFilesToArchive.hasRegularFiles) {
                 /*
                  * Since we are skipping the whole directory, `postVisitDirectory(…)` will not be invoked.
                  * We must reset `currentFilesToArchive` and `currentTargetVersion` by an explicit call.
@@ -430,10 +430,14 @@ final class FileCollector extends SimpleFileVisitor<Path> {
             if (checkForManifest && file.endsWith(MetadataFiles.MANIFEST) && currentModule.setManifest(file, false)) {
                 // Do not add `MANIFEST.MF`, it will be handled by the `--manifest` option instead.
             } else {
+                currentFilesToArchive.hasRegularFiles = true;
+                if (excludedFiles == null && directoryRoles.peekLast() == DirectoryRole.RESOURCES) {
+                    return FileVisitResult.SKIP_SIBLINGS; // We only wanted to verify whether at least one file exist.
+                }
                 currentFilesToArchive.add(file, attributes, false);
             }
-        } else {
-            excludedFiles.add(file); // Cannot be null if excluded files may exist.
+        } else if (excludedFiles != null) {
+            excludedFiles.add(file);
         }
         return FileVisitResult.CONTINUE;
     }
@@ -480,11 +484,17 @@ final class FileCollector extends SimpleFileVisitor<Path> {
     }
 
     /**
+     * Returns whether the given list is null or empty.
+     */
+    private static boolean isEmpty(final List<Path> paths) {
+        return paths == null || paths.isEmpty();
+    }
+
+    /**
      * Returns the object in charge of moving excluded files to a temporary directory, or {@code null} if none.
      */
     private ExcludedFiles exclusion() throws IOException {
-        if ((excludedFiles == null || excludedFiles.isEmpty())
-                && (excludedDirectories == null || excludedDirectories.isEmpty())) {
+        if (isEmpty(excludedFiles) && isEmpty(excludedDirectories)) {
             return null;
         }
         return new ExcludedFiles(rootDirectory, excludedFiles, excludedDirectories);
