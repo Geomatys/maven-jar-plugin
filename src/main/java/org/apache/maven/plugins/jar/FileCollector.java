@@ -88,6 +88,16 @@ final class FileCollector extends SimpleFileVisitor<Path> {
     private final boolean detectMultiReleaseJar;
 
     /**
+     * Wether to skip creating empty archives.
+     * If {@code true}, the {@code FileCollector} needs to check if at least one regular file exists.
+     * If {@code false} and there are no include/exclude filters, it is okay to visit only directories.
+     * The default value is {@code false}.
+     *
+     * @see AbstractJarMojo#skipIfEmpty
+     */
+    private final boolean skipIfEmpty;
+
+    /**
      * The root directory to traverse. It will be used for temporarily moving excluded files.
      */
     private final Path rootDirectory;
@@ -182,6 +192,7 @@ final class FileCollector extends SimpleFileVisitor<Path> {
         this.context = context;
         rootDirectory = directory;
         detectMultiReleaseJar = mojo.detectMultiReleaseJar;
+        skipIfEmpty = mojo.skipIfEmpty;
         directoryRoles = new ArrayDeque<>();
         fileMatcher = matcherFactory.createPathMatcher(directory, mojo.getIncludes(), mojo.getExcludes(), false);
         directoryMatcher = matcherFactory.deriveDirectoryMatcher(fileMatcher);
@@ -353,7 +364,7 @@ final class FileCollector extends SimpleFileVisitor<Path> {
          */
         if (role == DirectoryRole.RESOURCES) {
             currentFilesToArchive.add(directory, attributes, true);
-            if (excludedFiles == null && currentFilesToArchive.hasRegularFiles) {
+            if (excludedFiles == null && (!skipIfEmpty || currentFilesToArchive.hasRegularFiles)) {
                 /*
                  * Since we are skipping the whole directory, `postVisitDirectory(…)` will not be invoked.
                  * We must reset `currentFilesToArchive` and `currentTargetVersion` by an explicit call.
@@ -445,12 +456,10 @@ final class FileCollector extends SimpleFileVisitor<Path> {
     /**
      * Removes all empty archives and ensures that the lowest version is declared as the base version.
      * This method should be invoked after all output directories to archive have been fully scanned.
-     * If {@code skipIfEmpty} is {@code false}, this method ensures that at least one archive remains
-     * even if that archive is empty.
-     *
-     * @param skipIfEmpty value of {@link AbstractJarMojo#skipIfEmpty}
+     * If {@link AbstractJarMojo#skipIfEmpty} is {@code false}, this method ensures that at least one
+     * archive remains even if that archive is empty.
      */
-    public void prune(boolean skipIfEmpty) {
+    public void prune() {
         boolean isModuleHierarchy = !moduleHierarchy.isEmpty();
         moduleHierarchy.values().forEach((archive) -> archive.prune(skipIfEmpty));
         moduleHierarchy.values().removeIf(Archive::isEmpty);
@@ -470,7 +479,7 @@ final class FileCollector extends SimpleFileVisitor<Path> {
      * correct for a module. For now, we just log a warning and ignore.</p>
      *
      * <p><b>Prerequisites:</b>
-     * The {@link #prune(boolean)} method should have been invoked once before invoking this method.</p>
+     * The {@link #prune()} method should have been invoked once before invoking this method.</p>
      *
      * @return if this method ignored some files, the root directory of those files
      */
@@ -505,7 +514,7 @@ final class FileCollector extends SimpleFileVisitor<Path> {
      * If the project is multi-module, this method returns the path to the generated parent <abbr>POM</abbr> file.
      *
      * <p><b>Prerequisites:</b>
-     * The {@link #prune(boolean)} method should have been invoked once before to invoke this method.</p>
+     * The {@link #prune()} method should have been invoked once before to invoke this method.</p>
      *
      * @return path to the generated parent <abbr>POM</abbr> file, or {@code null} if none
      * @throws MojoException if an error occurred during the execution of the "jar" tool
@@ -542,7 +551,7 @@ final class FileCollector extends SimpleFileVisitor<Path> {
      * we do not perform such derivation for projects organized in the Maven 3 way.
      *
      * <h4>Prerequisites</h4>
-     * The {@link #prune(boolean)} method should have been invoked once before invoking this method.
+     * The {@link #prune()} method should have been invoked once before invoking this method.
      */
     List<Path> getModuleHierarchyRoots() {
         return moduleHierarchy.values().stream()
